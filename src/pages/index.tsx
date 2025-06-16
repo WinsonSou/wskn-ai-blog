@@ -1,5 +1,6 @@
 import type {ReactNode} from 'react';
 import Link from '@docusaurus/Link';
+import useBaseUrl from '@docusaurus/useBaseUrl';
 import Layout from '@theme/Layout';
 import Heading from '@theme/Heading';
 
@@ -12,7 +13,7 @@ function WinsonBio() {
         <div className={styles.bioContainer}>
           <div className={styles.profileImageContainer}>
             <img
-              src="/img/profile-pic.png"
+              src={useBaseUrl('/img/profile-pic.png')}
               alt="Winson Sou"
               className={styles.profileImage}
             />
