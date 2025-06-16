@@ -3,21 +3,364 @@
  * and scoped locally.
  */
 
-.heroBanner {
-  padding: 4rem 0;
-  text-align: center;
-  position: relative;
-  overflow: hidden;
-}
+.bioSection {
+  /* Fixed positioning to keep content centered */
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100%;
+  height: 100vh;
+  /* Base colour so that noise can blend nicely */
+  background: #0a0a0a;
+  /* Blue gradient theme */
+  background-image:
+    radial-gradient(120% 120% at 0% 30%, rgba(139, 92, 246, 0.3) 0%, rgba(139, 92, 246, 0.0) 60%),
+    radial-gradient(120% 120% at 100% 70%, rgba(124, 58, 237, 0.25) 0%, rgba(124, 58, 237, 0.0) 60%),
+    linear-gradient(135deg, #1e1b4b 0%, #312e81 100%);
 
-@media screen and (max-width: 996px) {
-  .heroBanner {
-    padding: 2rem;
-  }
-}
-
-.buttons {
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 2rem;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* Existing soft blur overlay */
+
+.bioSection::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  /* Copy current colourful background for blur */
+  background: inherit;
+  filter: blur(120px);
+  opacity: 0.7;
+  z-index: 0;
+}
+
+/* Grainy noise overlay – rendered on top of colour but under content */
+.bioSection::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  /* Create subtle static noise with 2 crossed repeating gradients */
+  background-image:
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.04) 0 1px, transparent 1px 2px),
+    repeating-linear-gradient(90deg, rgba(0, 0, 0, 0.04) 0 1px, transparent 1px 2px);
+  opacity: 0.35; /* strength of the grain */
+  mix-blend-mode: overlay;
+  z-index: 1;
+}
+
+/* Raise z-index of real content above the grain layer */
+
+.bioContainer {
+  display: flex;
+  align-items: flex-start;
+  gap: 3rem;
+  max-width: 1400px;
+  width: 100%;
+  margin: 0 auto;
+  position: relative;
+  z-index: 2; /* above ::after noise */
+  padding: 2rem;
+}
+
+.profileImageContainer {
+  flex-shrink: 0;
+  position: sticky;
+  top: 2rem;
+  align-self: flex-start;
+}
+
+.profileImage {
+  width: 280px;
+  height: 280px;
+  border-radius: 50%;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+  border: 5px solid rgba(255, 255, 255, 0.3);
+  object-fit: cover;
+}
+
+.bioContent {
+  flex: 1;
+  color: white;
+  max-height: calc(100vh - 8rem);
+  overflow-y: auto;
+  padding-right: 1rem;
+  /* Custom scrollbar for webkit browsers */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.3) transparent;
+}
+
+/* Ensure all text elements are white */
+.bioContent h1,
+.bioContent h2,
+.bioContent h3,
+.bioContent p,
+.bioContent li {
+  color: white !important;
+}
+
+.bioContent::-webkit-scrollbar {
+  width: 8px;
+}
+
+.bioContent::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.bioContent::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.3);
+  border-radius: 4px;
+}
+
+.bioContent::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255, 255, 255, 0.5);
+}
+
+.bioTitle {
+  font-size: 3.5rem;
+  font-weight: 700;
+  margin-bottom: 0.5rem;
+  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.bioRole {
+  font-size: 1.5rem;
+  font-weight: 300;
+  margin-bottom: 2rem;
+  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.bioDescription {
+  font-size: 1.25rem;
+  line-height: 1.8;
+  margin-bottom: 2rem;
+  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.bioLinks {
+  display: flex;
+  gap: 1rem;
+}
+
+.bioLinks a {
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.9) 0%, rgba(124, 58, 237, 0.9) 100%);
+  color: white;
+  border: none;
+  font-weight: 600;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 15px rgba(139, 92, 246, 0.3);
+}
+
+.bioLinks a:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(139, 92, 246, 0.4);
+  background: linear-gradient(135deg, rgba(139, 92, 246, 1) 0%, rgba(124, 58, 237, 1) 100%);
+}
+
+.expertiseSection {
+  margin: 3rem 0;
+}
+
+.sectionTitle {
+  font-size: 2rem;
+  font-weight: 600;
+  margin-bottom: 1.5rem;
+  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.expertiseGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 2rem;
+  margin-bottom: 2rem;
+}
+
+.expertiseItem {
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(10px);
+  border-radius: 12px;
+  padding: 1.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  transition: all 0.3s ease;
+}
+
+.expertiseItem:hover {
+  background: rgba(255, 255, 255, 0.08);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.2);
+}
+
+.expertiseItem h3 {
+  font-size: 1.3rem;
+  margin-bottom: 0.8rem;
+  color: white;
+  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.expertiseItem p {
+  font-size: 1rem;
+  line-height: 1.6;
+  margin: 0;
+  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.highlightsSection,
+.credentialsSection {
+  margin: 3rem 0;
+}
+
+.highlightsList,
+.credentialsList {
+  font-size: 1.1rem;
+  line-height: 1.8;
+  padding-left: 1.5rem;
+  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.highlightsList li,
+.credentialsList li {
+  margin-bottom: 0.8rem;
+}
+
+.personalNote {
+  font-size: 1.15rem;
+  font-style: italic;
+  margin: 2.5rem 0;
+  padding: 1.5rem;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 12px;
+  border-left: 4px solid rgba(255, 255, 255, 0.2);
+  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+@media screen and (max-width: 996px) {
+  .bioSection {
+    padding: 1rem;
+  }
+  
+  .bioContainer {
+    flex-direction: column;
+    text-align: center;
+    gap: 2rem;
+    padding: 1rem;
+  }
+  
+  .profileImageContainer {
+    position: relative;
+    top: auto;
+  }
+  
+  .profileImage {
+    width: 180px;
+    height: 180px;
+  }
+  
+  .bioContent {
+    max-height: none;
+    overflow-y: visible;
+    padding-right: 0;
+  }
+  
+  .bioTitle {
+    font-size: 2.5rem;
+  }
+  
+  .bioRole {
+    font-size: 1.25rem;
+  }
+  
+  .bioDescription {
+    font-size: 1.1rem;
+  }
+  
+  .bioLinks {
+    justify-content: center;
+  }
+  
+  .expertiseGrid {
+    grid-template-columns: 1fr;
+    gap: 1.5rem;
+  }
+  
+  .sectionTitle {
+    font-size: 1.75rem;
+  }
+  
+  .expertiseItem h3 {
+    font-size: 1.2rem;
+  }
+  
+  .highlightsList,
+  .credentialsList {
+    font-size: 1rem;
+  }
+  
+  .personalNote {
+    font-size: 1.05rem;
+  }
+}
+
+/* Dark mode styling for bio page */
+[data-theme='dark'] .bioSection {
+  background: #0a0a0a;
+  background-image:
+    radial-gradient(120% 120% at 0% 30%, rgba(139, 92, 246, 0.3) 0%, rgba(139, 92, 246, 0.0) 60%),
+    radial-gradient(120% 120% at 100% 70%, rgba(124, 58, 237, 0.25) 0%, rgba(124, 58, 237, 0.0) 60%),
+    linear-gradient(135deg, #1e1b4b 0%, #312e81 100%);
+}
+
+[data-theme='dark'] .bioSection::after {
+  background-image:
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.02) 0 1px, transparent 1px 2px),
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.02) 0 1px, transparent 1px 2px);
+  opacity: 0.4;
+}
+
+[data-theme='dark'] .profileImage {
+  width: 280px;
+  height: 280px;
+  border-radius: 50%;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+  border: 5px solid rgba(255, 255, 255, 0.3);
+  object-fit: cover;
+}
+
+[data-theme='dark'] .expertiseItem {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+[data-theme='dark'] .expertiseItem:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+[data-theme='dark'] .personalNote {
+  background: rgba(255, 255, 255, 0.05);
+  border-left-color: rgba(255, 255, 255, 0.2);
+}
+
+[data-theme='dark'] .bioLinks a {
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.9) 0%, rgba(124, 58, 237, 0.9) 100%);
+  color: white;
+  box-shadow: 0 4px 15px rgba(139, 92, 246, 0.3);
+}
+
+[data-theme='dark'] .bioLinks a:hover {
+  background: linear-gradient(135deg, rgba(139, 92, 246, 1) 0%, rgba(124, 58, 237, 1) 100%);
+  box-shadow: 0 6px 20px rgba(139, 92, 246, 0.4);
+}
+
+[data-theme='dark'] .bioContent::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.2);
+}
+
+[data-theme='dark'] .bioContent::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255, 255, 255, 0.3);
 }
