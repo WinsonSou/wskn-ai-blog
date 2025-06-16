@@ -60,7 +60,7 @@
 
 /* Transparent navbar for all pages - same for light and dark modes */
 .navbar {
-  background: rgba(30, 25, 75, 0.3) !important;
+  background: rgba(30, 25, 75, 0.8) !important;
   backdrop-filter: blur(20px) !important;
   border-bottom: 1px solid rgba(139, 92, 246, 0.1) !important;
   transition: background 0.3s ease, box-shadow 0.3s ease;
