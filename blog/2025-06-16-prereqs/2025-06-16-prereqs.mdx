@@ -17,7 +17,7 @@ Lets dive in!
 
 {/* truncate */}
 
-<div align="center">
+{/* <div align="center">
 #### For friends who prefer to watch a video about this post, it's here below. 😀
 
   <iframe
@@ -30,12 +30,12 @@ Lets dive in!
     referrerpolicy="strict-origin-when-cross-origin"
     allowfullscreen
   ></iframe>
-</div>
+</div> */}
 
 ## TL;DR
 
 - NKP installation succeeds only when all prerequisites are in place—treat this as a checklist before you run the installer.
-- Spin up a small **jumphost/bastion** (Ubuntu, Rocky, RHEL, etc.) and install the key tooling: `kubectl`, `yq`, `helm`, `k9s`, `docker`, `kubeseal`, plus optional `cilium`, `flux`, and `istio` CLIs.
+- Spin up a small **jumphost/bastion** (Ubuntu, Rocky, RHEL, etc.) and install the key tooling: `kubectl`, `yq`, `helm`, `k9s`, `docker`, `kubeseal`, plus optional `cilium`, `flux`, and `istio` CLIs with 2vCPUs and 8GB of RAM.
 - Create and verify **DNS records** for the NKP cluster FQDN, Prism Central (PC), internal container registry, Nutanix Files & Objects endpoints.
 - Issue valid **TLS certificates** for the NKP FQDN, PC, registry (and any other endpoints) with correct SANs.
 - Mirror the **NKP air-gapped bundle (~15 GB)** to an **internal registry** to avoid Docker Hub rate limits and ensure a consistently quick installation experience.
@@ -72,8 +72,7 @@ Here's a list to ensure that you have everything you need:
 - Pre-provisioned OS (If Deploying on Bare Metal / Self-Provisioned VMs / CloudVMs)
 - Custom BaseOS Images (If using your own images.)
 - Resource Configurations for Control Plane and Worker Nodes
-- Airgapped Bundle (Mandatory!)
-- NKP CLI
+- Airgapped Bundle & NKP CLI (Mandatory!)
 
 Lets break it down into their individual sections.
 
@@ -81,7 +80,9 @@ Lets break it down into their individual sections.
 
 What do we use a Jumphost/Bastion for? Well we basically execute all the commands to install NKP, and any additional commands to do configuration changes etc. I typically like to have a dedicated Jumphost/Bastion to access my clusters instead of accessing those directly from my Mac.
 
-Provision a small VM (Ubuntu 22.04 / Ubuntu 24.04 LTS / Rocky / RHEL with 2 vCPU, 8 GiB) with the following tools installed. Below this section i provide a automated script for both Debian and Fedora. In my previous video i used Rocky Linux instead. Either distribution doesnt matter and it's all person preference. But since Nutanix now has a partnership with Canonical, i personally felt it was a good time to get familiar with Ubuntu.
+Provision a small VM (Ubuntu 22.04 / Ubuntu 24.04 LTS / Rocky / RHEL) with the following tools installed. Below this section i provide a automated script for both Debian and Fedora. In my previous video i used Rocky Linux instead. Either distribution doesnt matter and it's all person preference. But since Nutanix now has a partnership with Canonical, i personally felt it was a good time to get familiar with Ubuntu.
+
+**Use the following resource assignments:** 2vCPUs, 8GB RAM
 
 - `kubectl` - To interact with Kuberentes
 - `yq` - Great for yaml, json, etc parsing 
@@ -96,6 +97,7 @@ Provision a small VM (Ubuntu 22.04 / Ubuntu 24.04 LTS / Rocky / RHEL with 2 vCPU
 - `nkp` CLI - CLI tool used to install and manage NKP
 
 #### Note the script uses sudo, so prepare your sudo password to perform the installation.
+#### For my airgapped friends.. sorry! You'll need to manually download the individual RPMs/DEBs and bring it into your jumphost.
 
 <Tabs>
 <TabItem value="debian" label="Debian (Ubuntu)" default>
@@ -603,33 +605,38 @@ Not to worry, we'll have a dedicated section on creating your own Custom Base Im
 
 - 8 vCPU, 32 GiB RAM, 100 GiB disk  (Ensure Disk sizes are appropriate for /var/lib/containerd)
 
-### Air-gapped Bundle (Mandatory!)
+### Air-gapped Bundle & NKP CLI (Mandatory!)
 
 We definitely want to download the Nutanix Kubernetes Platform Airgapped bundle. We'll use this bundle to push all the container images used in Nutanix Kubernetes Platform into our Registry, so when deploying NKP, we are not encumbered by rate limits and network bottlenecks.
 
 Once we download the Airgapped bundle, we'll push it to the Internal Registry we created above in the [Internal Registry](#internal-registry) Section.
 
-We'll be downloading the Airgapped bundle directly into the Jumphost. We can download it from the Nutanix Portal.
+While it's a rather chunky bundle, ~15GB large, trust me the experience after that is way better.
+
+We'll be downloading the Airgapped bundle directly into the **Jumphost**. We can download it from the Nutanix Portal.
 
 <p align="center">
   <img src={require('./download.png').default} width="1000px" border="2px"/>
 </p>
 
 
-Below is a script that i always use to Download the latest airgapped bundles.
+Below is a script that i always use to Download and push the latest airgapped bundles.
 
 ```bash title="Mirroring Airgapped Bundle" showLineNumbers
-
 ## Ensure that you change the below to your environment.
-export NKP_VERSION=v2.15.0
-export REGISTRY_FQDN=registry.wskn.local/mirror
-
-curl -Lo "nkp-air-gapped-bundle_${NKP_VERSION}_linux_amd64.tar.gz" \
 # highlight-start
-    "DOWNLOAD LINK URL YOU COPIED FROM THE ABOVE STEP"
+export NKP_VERSION=v2.15.0
+export REGISTRY_URL=registry.wskn.local/mirror
+export REGISTRY_USERNAME=admin
+export REGISTRY_PASSWORD=Harbor12345 #This is the default harbor password. Change to your environment
+export REGISTRY_CACERT=/home/winson/certs/wskn-ca-chain.crt #ICA + RCA Chain
 # highlight-end
 
-
+## Replace the DOWNLOAD_LINK_URL_YOU_COPIED_FROM_THE_ABOVE_STEP with the link you got above from the Nutanix Portal
+curl -Lo "nkp-air-gapped-bundle_${NKP_VERSION}_linux_amd64.tar.gz" \
+# highlight-start
+    "DOWNLOAD_LINK_URL_YOU_COPIED_FROM_THE_ABOVE_STEP"
+# highlight-end
 
 ## Ensure that you change <VERSION> to your actual NKP version
 # highlight-start
@@ -641,8 +648,31 @@ tar zxvf nkp-air-gapped-bundle_${NKP_VERSION}_linux_amd64.tar.gz
 cd nkp-${NKP_VERSION}
 # highlight-end
 
+## Install NKP CLI
+sudo cp ./cli/nkp /usr/bin/nkp
+sudo chmod 755 /usr/bin/nkp
+source <(nkp completion bash)
+echo "source <(nkp completion bash)" >> ~/.bashrc
+echo "source <(nkp completion bash)" | sudo tee -a /root/.bashrc > /dev/null
 
+## Load NKP Bootstrap and Image Builder Images
+sudo docker load -i nkp-image-builder-image-${NKP_VERSION}.tar
+sudo docker load -i konvoy-bootstrap-image-${NKP_VERSION}.tar
 
+## Push NKP images into registry
+nkp push bundle --bundle ./container-images/konvoy-image-bundle-${NKP_VERSION}.tar \
+  --to-registry=${REGISTRY_URL} \
+  --to-registry-username=${REGISTRY_USERNAME} \
+  --to-registry-password=${REGISTRY_PASSWORD} \
+  --to-registry-ca-cert-file=${REGISTRY_CACERT}
 
-
+nkp push bundle --bundle ./container-images/kommander-image-bundle-${NKP_VERSION}.tar \
+  --to-registry=${REGISTRY_URL} \
+  --to-registry-username=${REGISTRY_USERNAME} \
+  --to-registry-password=${REGISTRY_PASSWORD} \
+  --to-registry-ca-cert-file=${REGISTRY_CACERT}
 ```
+
+Thats it! By dilligently following all the steps above, we'll eliminate almost 90% of all the potential issues when doing installations and help us with a single shot installation.
+
+Thanks for reading and i'll see you on the next one! 
