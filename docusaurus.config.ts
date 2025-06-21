@@ -171,7 +171,6 @@ const config: Config = {
       }),
     ],
   ],
-  plugins: ['@docusaurus/plugin-ideal-image'],
 };
 
 export default config;
