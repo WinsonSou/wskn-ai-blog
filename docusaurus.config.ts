@@ -143,10 +143,12 @@ const config: Config = {
     prism: {
       theme: prismThemes.github,
       darkTheme: prismThemes.dracula,
+      additionalLanguages: ['bash'],
     },
   } satisfies Preset.ThemeConfig,
   themes: [
     // ... Your other themes.
+    '@docusaurus/theme-live-codeblock',
     [
       require.resolve("@easyops-cn/docusaurus-search-local"),
       /** @type {import("@easyops-cn/docusaurus-search-local").PluginOptions} */
@@ -169,6 +171,7 @@ const config: Config = {
       }),
     ],
   ],
+  plugins: ['@docusaurus/plugin-ideal-image'],
 };
 
 export default config;
