@@ -1,0 +1,395 @@
+---
+slug: harbor-deployment
+title: Deploying Harbor
+authors: [winson]
+tags: [Harbor]
+---
+
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
+
+Hello friends, how's it going!?
+
+Today we are going to be covering deploying Harbor on Nutanix AHV.
+
+We'll cover both Internet Connected and Airgapped environments. 
+
+This provide a solid foundation for us to carry on with our eventual Nutanix Kubernetes Platform deployment in an airgapped environment.
+
+Lets dive in!
+
+{/* truncate */}
+
+{/* <div align="center">
+#### For friends who prefer to watch a video about this post, it's here below. 😀
+
+  <iframe
+    width="560"
+    height="315"
+    src="https://www.youtube.com/embed/dZlWqdRCLl0?si=4VlReTHeQOnu2nU8"
+    title="YouTube video player"
+    frameborder="0"
+    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+    referrerpolicy="strict-origin-when-cross-origin"
+    allowfullscreen
+  ></iframe>
+</div> */}
+
+## Creating and Preparing the Harbor VM
+
+Firstly, we need to ensure we are logged in to Prism Central. I wont cover how to do that 😂
+
+**The below steps are applicable to both internet connected and airgapped environments.**
+
+1. Create a new VM
+
+<p align="center">   <img src={require('./2025-08-07-17-03-09.png').default} border="2px"/> </p>
+
+2. Fill up the Name, Cluster and VM Properties.
+
+<p align="center">   <img src={require('./2025-08-07-17-03-31.png').default}  border="2px"/> </p>
+
+3. Click Attach Disk
+
+<p align="center">   <img src={require('./2025-08-07-17-04-04.png').default}  border="2px"/> </p>
+
+4. We'll be Cloning the Image from the Ubuntu 24.04 Image I downloaded. And using 100GB for the OS Drive.
+
+<p align="center">   <img src={require('./2025-08-07-17-04-47.png').default}  border="2px"/> </p>
+
+5. Create a Network Connection. 
+
+<p align="center">   <img src={require('./2025-08-07-17-06-02.png').default}  border="2px"/> </p>
+
+<p align="center">   <img src={require('./2025-08-07-17-05-47.png').default} border="2px"/> </p>
+
+6. We'll Leave UEFI BIOS Mode Boot as is
+
+7. Configure Cloud Init as the Guest Customization. 
+
+<p align="center">   <img src={require('./2025-08-07-17-07-45.png').default}  border="2px"/> </p>
+
+Here's a sample Cloud Init in case you need it. **JUST MAKE SURE TO CHANGE THE PUBLIC SSH KEY**
+
+```bash title="Sample Cloud Init for Ubuntu" showLineNumbers
+#cloud-config
+preserve_hostname: false
+users:
+  - name: ubuntu
+    shell: /bin/bash
+    ssh-authorized-keys:
+    # highlight-start
+      - **REPLACE WITH YOUR KEY**
+    # highlight-end
+    sudo: ['ALL=(ALL) NOPASSWD:ALL']
+```
+
+Then go ahead and create the VM.
+
+9. While the VM is being created, we can go ahead and prepare the Volume Groups. 
+
+The Volume Groups allow us to attach 6 disks of 500GB each via Direct Attach Volume Group attachments (an amazing AHV feature) and combine it with Volume Group Load Balancing to extract maximum performance.
+
+Click Volume Groups
+
+<p align="center">   <img src={require('./2025-08-07-20-25-05.png').default}  border="2px"/> </p>
+
+10. Give it a Name, Select the Cluster and Click Add Disks and add 6x 500GB disks. (Size is up to you. It's 500GB for me.)
+
+<p align="center">   <img src={require('./Screenshot 2025-08-07 at 8.26.07 PM.png').default}  border="2px"/> </p>
+
+<p align="center">   <img src={require('./Screenshot 2025-08-07 at 8.28.41 PM.png').default}  border="2px"/> </p>
+
+11. Select Virtual Machines, under the Connect Clients, Under Select Virtual Machines, select the VM you wish to attach the VG to, and Check Load Balance Volume Group.
+
+<p align="center">   <img src={require('./Screenshot 2025-08-07 at 8.30.33 PM.png').default}  border="2px"/> </p>
+
+Complete the creation process with the defaults.
+
+12. Once done, we can then Power on the VM, and once the VM has booted, we can perform a couple of steps to format the VG.
+
+SSH into the Registry, elevate permissions (sudo -i) and run the following commands. Note this is for Ubuntu, you will need to adapt it to for other distributions.
+
+```bash title="Format and Mount VG" showLineNumbers
+# Update and install necessary packages
+sudo apt update
+sudo apt install -y lvm2 xfsprogs
+
+# Configure kernel parameters for storage optimization
+echo "vm.swappiness=10" | sudo tee -a /etc/sysctl.conf
+echo "vm.dirty_ratio=15" | sudo tee -a /etc/sysctl.conf
+echo "vm.dirty_background_ratio=5" | sudo tee -a /etc/sysctl.conf
+sudo sysctl -p
+
+# Set SCSI timeout to 60 seconds for all sd devices
+for disk in /sys/block/sd*/device/timeout; do echo 60 | sudo tee $disk; done
+
+# Install multipath tools (optional, for better performance)
+sudo apt install -y multipath-tools
+sudo systemctl enable multipathd
+sudo systemctl start multipathd
+
+# Verify you have 6 disks.
+lsblk 
+
+# First, verify the disks are clean
+sudo fdisk -l | grep -E "Disk /dev/sd[b-g]"
+
+# Create physical volumes on the 250GB disks. MAKE SURE YOU DOUBLE TRIPLE CHECK THE DRIVES ARE CORRECT!
+sudo pvcreate /dev/sdb /dev/sdc /dev/sdd /dev/sde /dev/sdf /dev/sdg
+
+# Verify physical volumes were created
+sudo pvs
+
+# Create volume group for Harbor storage MAKE SURE YOU DOUBLE TRIPLE CHECK THE DRIVES ARE CORRECT!
+sudo vgcreate harbor_vg /dev/sdb /dev/sdc /dev/sdd /dev/sde /dev/sdf /dev/sdg
+
+# Verify volume group
+sudo vgs
+
+# Create logical volume with striping across all 6 disks
+sudo lvcreate -L 2.9T -i 6 -I 256k -n harbor_lv harbor_vg
+
+# Verify the logical volume and striping
+sudo lvs -o +devices
+sudo lvdisplay -m /dev/harbor_vg/harbor_lv
+
+# Create XFS filesystem (recommended for Harbor)
+sudo mkfs.xfs -f /dev/harbor_vg/harbor_lv
+
+# Create mount point for Harbor data
+sudo mkdir -p /data
+
+# Add to fstab for persistent mounting (without the deprecated nobarrier option)
+echo "/dev/harbor_vg/harbor_lv /data xfs defaults,noatime,nodiratime 0 0" | sudo tee -a /etc/fstab
+
+# Mount the filesystem
+sudo mount -a
+
+# Verify the mount
+df -h /data
+mount | grep /data
+```
+
+This concludes the preparation of the Volume Groups for the Harbor VM.
+
+## Installing Harbor
+
+Now we'll work on Installing Harbor on the VM itself. This will be broken into 2 sections. Internet connected and airgapped environments.
+
+### Installing Harbor in an Internet Connected Environment
+
+For Internet connected, it's straightforward. Just run the below script. If you're not using Ubuntu, you'll need to adapt the script for your use.
+
+One thing, do make sure you have the certificates already created. If you need help, it's in my blog under the [Certificates](nkp-prerequisites#certificates) section in the [NKP Prerequisites](nkp-prerequisites) blog. 
+
+```bash
+# Elevate permissions
+sudo -i
+
+# Install Docker
+## Remove podman if installed (not common on Ubuntu, but just in case)
+for pkg in docker.io docker-doc docker-compose docker-compose-v2 podman-docker containerd runc; do sudo apt-get remove $pkg; done
+
+## Add Docker’s official GPG key and repo
+sudo install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --batch --yes --dearmor -o /etc/apt/keyrings/docker.gpg
+echo \
+  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
+  https://download.docker.com/linux/ubuntu \
+  "$(lsb_release -cs)"" stable" | \
+  sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+sudo apt update
+sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+sudo systemctl enable --now docker
+
+mkdir -p /harbor && cd /harbor
+
+## ENSURE YOU CHANGE THE FQDN BELOW TO SUIT YOUR ENVIRONMENT!
+## ENSURE YOU ALREADY HAVE THE CERTIFICATES!!
+
+# highlight-start
+export DOMAIN_NAME=wskn.local
+export REGISTRY_FQDN=registry.wskn.local
+export CA_CERT_PATH=/home/ubuntu/certificates/server.crt
+export CA_KEY_PATH=/home/ubuntu/certificates/server.key
+export CA_CHAIN_PATH=/home/ubuntu/certificates/wskn-ca-chain.crt
+# highlight-end
+
+# Download Harbor Binaries
+curl -s https://api.github.com/repos/goharbor/harbor/releases/latest | grep browser_download_url | cut -d '"' -f 4 | grep '\.tgz$' | wget -i -
+
+tar xvzf harbor-offline-installer*.tgz
+
+cd harbor
+
+docker load -i harbor.*.tar.gz
+
+cp harbor.yml.tmpl harbor.yml
+
+mkdir -p /etc/docker/certs.d/${DOMAIN_NAME}
+
+cp ${CA_CHAIN_PATH} /etc/docker/certs.d/${DOMAIN_NAME}
+
+# Install CA certificates based on OS
+if [ -f /etc/redhat-release ] || [ -f /etc/fedora-release ] || [ -f /etc/rocky-release ] || [ -f /etc/almalinux-release ]; then
+    # RHEL/CentOS/Fedora/Rocky/AlmaLinux
+    cp ${CA_CHAIN_PATH} /etc/pki/ca-trust/source/anchors/
+    update-ca-trust
+elif [ -f /etc/debian_version ] || [ -f /etc/lsb-release ]; then
+    # Debian/Ubuntu and derivatives
+    cp ${CA_CHAIN_PATH} /usr/local/share/ca-certificates/
+    update-ca-certificates
+else
+    echo "Warning: Unknown OS. Please manually install CA certificates."
+fi
+
+systemctl restart docker
+
+sed -i \
+-e 's/hostname: reg.mydomain.com/hostname: '${REGISTRY_FQDN}'/' \
+-e 's|certificate: /your/certificate/path|certificate: '${CA_CERT_PATH}'|' \
+-e 's|private_key: /your/private/key/path|private_key: '${CA_KEY_PATH}'|' \
+harbor.yml
+
+./prepare
+./install.sh
+```
+
+Go ahead and visit the FQDN of your Harbor registry and you'll be able to login to Harbor using the default credentials:
+**Username:** admin
+**Password:** Harbor12345
+
+<p align="center">   <img src={require('./2025-08-07-22-12-47.png').default} width={500} border="2px"/> </p>
+
+And thats it for installing Harbor in an Internet Connected Environment!
+
+You're done here and i'll see you in the next one.
+
+### Installing Harbor in an Airgapped Environment
+
+For Airgapped installations, it's a little more tedious, but definitely possible!
+
+We first need to use an internet connected machine to download all the necessary binaries. Then figure a way to transfer the binaries from the internet connected machine into the airgapped environment. This can be through flashdrives, DVDs or a one-way diode for example.
+
+Looks something like this.
+
+<p align="center">   <img src={require('./2025-08-07-21-08-11.png').default}  border="2px"/> </p>
+
+First, on your internet connected jumphost, you'll need to execute this command to download the latest docker `.debs` from the Docker APT repository and the latest Harbor installer.
+
+I like to make life easy and deterministic, so we've got this little script that makes things simple, predictable and a single bundle to transfer to our airgapped environment.
+
+```bash
+## Add Docker’s official GPG key and repo
+sudo install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --batch --yes --dearmor -o /etc/apt/keyrings/docker.gpg
+echo \
+  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
+  https://download.docker.com/linux/ubuntu \
+  $(lsb_release -cs) stable" | \
+  sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+sudo apt update
+
+mkdir offline-installers && cd offline-installers
+
+apt-get download \
+    containerd.io \
+    docker-ce \
+    docker-ce-cli \
+    docker-buildx-plugin \
+    docker-compose-plugin
+
+curl -s https://api.github.com/repos/goharbor/harbor/releases/latest | grep browser_download_url | cut -d '"' -f 4 | grep '\.tgz$' | wget -i -
+
+cd ..
+
+tar -czvf offline-installers.tar.gz offline-installers/
+```
+
+And there we have it. A single bundle that will allow us to install Docker and Harbor, ready to be transported to the airgapped environment.
+
+One thing, do make sure you have the certificates already created. If you need help, it's in my blog under the [Certificates](nkp-prerequisites#certificates) section in the [NKP Prerequisites](nkp-prerequisites) blog.
+
+How to transfer the bundle into the airgapped environment is entirely up to you. You can use Flashdrives, DVDs or plain old scp.
+
+After we've transferred the `offline-installers.tar.gz` file into the airgapped registry, we can go ahead and perform the installation, by following another script. 😁
+
+```bash
+# Elevate permissions
+sudo -i
+
+# Untar offline-installers.tar.gz
+tar zxvf offline-installers.tar.gz
+
+cd offline-installers
+
+# Install Docker via .deb files
+sudo dpkg -i *.deb
+sudo apt-get install -f -y
+
+mkdir -p /harbor 
+
+mv harbor-offline-installer-*.tgz /harbor
+
+cd /harbor
+
+## ENSURE YOU CHANGE THE FQDN BELOW TO SUIT YOUR ENVIRONMENT!
+## ENSURE YOU ALREADY HAVE THE CERTIFICATES!!
+
+# highlight-start
+export DOMAIN_NAME=wskn.local
+export REGISTRY_FQDN=ag-registry.wskn.local
+export CA_CERT_PATH=/home/ubuntu/certificates/server.crt
+export CA_KEY_PATH=/home/ubuntu/certificates/server.key
+export CA_CHAIN_PATH=/home/ubuntu/certificates/wskn-ca-chain.crt
+# highlight-end
+
+tar xvzf harbor-offline-installer*.tgz
+
+cd harbor
+
+docker load -i harbor.*.tar.gz
+
+cp harbor.yml.tmpl harbor.yml
+
+mkdir -p /etc/docker/certs.d/${DOMAIN_NAME}
+
+cp ${CA_CHAIN_PATH} /etc/docker/certs.d/${DOMAIN_NAME}
+
+# Install CA certificates based on OS
+if [ -f /etc/redhat-release ] || [ -f /etc/fedora-release ] || [ -f /etc/rocky-release ] || [ -f /etc/almalinux-release ]; then
+    # RHEL/CentOS/Fedora/Rocky/AlmaLinux
+    cp ${CA_CHAIN_PATH} /etc/pki/ca-trust/source/anchors/
+    update-ca-trust
+elif [ -f /etc/debian_version ] || [ -f /etc/lsb-release ]; then
+    # Debian/Ubuntu and derivatives
+    cp ${CA_CHAIN_PATH} /usr/local/share/ca-certificates/
+    update-ca-certificates
+else
+    echo "Warning: Unknown OS. Please manually install CA certificates."
+fi
+
+systemctl restart docker
+
+sed -i \
+-e 's/hostname: reg.mydomain.com/hostname: '${REGISTRY_FQDN}'/' \
+-e 's|certificate: /your/certificate/path|certificate: '${CA_CERT_PATH}'|' \
+-e 's|private_key: /your/private/key/path|private_key: '${CA_KEY_PATH}'|' \
+harbor.yml
+
+./prepare
+./install.sh
+```
+Go ahead and visit the FQDN of your Harbor registry and you'll be able to login to Harbor using the default credentials:
+**Username:** admin
+**Password:** Harbor12345
+
+<p align="center">   <img src={require('./2025-08-07-22-27-39.png').default} width={500} border="2px"/> </p>
+
+And thats it for installing Harbor in an Airgapped Environment!
+
+Thanks for reading and i'll see you on the next one! 
