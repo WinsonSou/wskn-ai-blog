@@ -21,20 +21,24 @@ Lets dive in!
 
 {/* truncate */}
 
-{/* <div align="center">
+<div align="center">
 #### For friends who prefer to watch a video about this post, it's here below. 😀
 
+## Internet Connected + SSL Certificates
   <iframe
     width="560"
     height="315"
-    src="https://www.youtube.com/embed/dZlWqdRCLl0?si=4VlReTHeQOnu2nU8"
-    title="YouTube video player"
+    src="https://www.youtube.com/embed/Oesmo61SEzs?si=zrp2qIsWxrLjP05e"
+    title="Deploying Harbor"
     frameborder="0"
     allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
     referrerpolicy="strict-origin-when-cross-origin"
     allowfullscreen
   ></iframe>
-</div> */}
+</div>
+
+## Airgapped + SSL Certificates
+
 
 ## Creating and Preparing the Harbor VM
 
@@ -393,3 +397,91 @@ Go ahead and visit the FQDN of your Harbor registry and you'll be able to login 
 And thats it for installing Harbor in an Airgapped Environment!
 
 Thanks for reading and i'll see you on the next one! 
+
+## Bonus Stuff! Airgapped Jumphost!
+
+Some bonus stuff, since i'm setting up my airgapped jumphost anyways. We'll need to install tooling like `kubectl`, `stepcli`, etc. here's a script that works on an Internet Connected Ubuntu (24.04, but should also work for 22.04) that downloads everything for us.
+
+```bash
+# Elevate Permissions
+
+mkdir jumphost-offline-installers && cd jumphost-offline-installers
+
+# step-cli
+curl -fsSL https://packages.smallstep.com/keys/apt/repo-signing-key.gpg | sudo tee /etc/apt/trusted.gpg.d/smallstep.asc > /dev/null
+echo 'deb [signed-by=/etc/apt/trusted.gpg.d/smallstep.asc] https://packages.smallstep.com/stable/debian debs main' \
+    | sudo tee /etc/apt/sources.list.d/smallstep.list > /dev/null
+sudo apt-get update
+
+mkdir jumphost-offline-installers && cd jumphost-offline-installers
+
+apt-get download \
+    bash-completion \
+    git \
+    gnupg \
+    lsb-release \
+    ca-certificates \
+    jq \
+    docker-ce \
+    docker-ce-cli \
+    containerd.io \
+    docker-buildx-plugin \
+    docker-compose-plugin \
+    step-cli
+
+# Download kubectl
+curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+chmod +x kubectl
+
+# Download Helm
+curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+cp $(which helm) .
+chmod +x helm
+
+wget https://github.com/derailed/k9s/releases/latest/download/k9s_Linux_amd64.tar.gz
+
+cd ..
+
+tar czvf jumphost-offline-installers.tar.gz jumphost-offline-installers/
+```
+
+Thats it. Now you can transfer the `jumphost-offline-installers.tar.gz` into your airgapped jumphost.
+
+Once it's transferred, you can run the below script to do the installation.
+
+```bash
+# Untar jumphost-offline-installers.tar.gz
+tar zxvf jumphost-offline-installers.tar.gz
+
+cd jumphost-offline-installers
+
+sudo dpkg -i *.deb
+sudo apt-get install -f -y
+
+sudo mv helm /usr/bin/
+sudo mv kubectl /usr/bin/
+
+tar zxvf k9s_Linux_amd64.tar.gz && rm -rf LICENSE README.md
+sudo mv k9s /usr/bin
+
+source <(kubectl completion bash)
+echo "source <(kubectl completion bash)" >> ~/.bashrc
+echo "alias k=kubectl" >> ~/.bashrc
+echo "complete -o default -F __start_kubectl k" >> ~/.bashrc
+# Also add kubectl completion to root's bashrc
+echo "source <(kubectl completion bash)" | sudo tee -a /root/.bashrc > /dev/null
+echo "alias k=kubectl" | sudo tee -a /root/.bashrc > /dev/null
+echo "complete -o default -F __start_kubectl k" | sudo tee -a /root/.bashrc > /dev/null
+
+source <(helm completion bash)
+echo "source <(helm completion bash)" >> ~/.bashrc
+echo "source <(helm completion bash)" | sudo tee -a /root/.bashrc > /dev/null
+
+source <(k9s completion bash)
+echo "source <(k9s completion bash)" >> ~/.bashrc
+echo "source <(k9s completion bash)" | sudo tee -a /root/.bashrc > /dev/null
+
+source <(step completion bash)
+echo "source <(step completion bash)" >> ~/.bashrc
+echo "source <(step completion bash)" | sudo tee -a /root/.bashrc > /dev/null
+```
