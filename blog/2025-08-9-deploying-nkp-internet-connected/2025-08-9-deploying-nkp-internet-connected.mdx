@@ -1,0 +1,460 @@
+---
+slug: nkp-deployment-internet
+title: Deploying Nutanix Kubernetes Platform, Internet Connected
+authors: [winson]
+tags: [Deploy, NKP]
+---
+
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
+
+Hello friends, welcome back!
+
+Today we're going to finally be deploying Nutanix Kubernetes Platform in an internet connected environment.
+
+Up till now, we've only been preparing the environment so that our environment is ready to deploy Nutanix Kubernetes Platform. Lets get started!
+
+{/* truncate */}
+
+
+<div align="center">
+#### For friends who prefer to watch a video about this post, it's here below. 😀
+
+  <iframe
+    width="560"
+    height="315"
+    src="https://www.youtube.com/embed/Oesmo61SEzs?si=zrp2qIsWxrLjP05e"
+    title="Deploying Harbor Internet Connected"
+    frameborder="0"
+    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+    referrerpolicy="strict-origin-when-cross-origin"
+    allowfullscreen
+  ></iframe>
+</div>
+
+
+## Download NKP Airgapped Bundle and install `nkp` cli
+
+I know we're doing an Internet Connected installation, so why download the airgapped bundle? Well, we want to avoid Docker Rate Limits thats why. Installation is also much faster using the Airapped Bundle. But fret not, the actual Cluster that gets deployed is Internet Connected/Capable.
+
+Head to https://portal.nutanix.com and login with your Nutanix Portal Credentials
+
+Then head over to the Downloads Section
+
+<p align="center">   <img src={require('./2025-08-09-20-39-07.png').default} width={400} border="2px"/> </p>
+
+Select Nutanix Kubernetes Platform
+
+<p align="center">   <img src={require('./2025-08-09-20-39-54.png').default}  border="2px"/> </p>
+
+Get the URL of the NKP Airgapped Bundle version you wish to download.
+
+<p align="center">   <img src={require('./2025-08-09-20-41-38.png').default}  border="2px"/> </p>
+
+Then in our Jumphost, we run this command to download the airgapped bundle with the URL we just copied.
+
+```bash
+# Replace the URL with the one you got from the Nutanix Portal
+curl -Lo "nkp-air-gapped-bundle_v2.15.0_linux_amd64.tar.gz" "https://download.nutanix.com/downloads/nkp/v2.15.0/nkp-air-gapped-bundle_v2.15.0_linux_amd64.tar.gz?xxxxxxxxxxx"
+```
+
+Then once the download is completed, we can decompress the tarball and change directories into it. If you're following along with a later version, just change the filenames.
+
+```bash
+tar zxvf nkp-air-gapped-bundle_v2.15.0_linux_amd64.tar.gz && cd nkp-v2.15.0
+```
+
+We can then copy the `nkp` cli into the `/usr/bin` directory
+
+```bash
+sudo cp ./cli/nkp /usr/bin
+```
+
+Lastly we load the Konvoy Bootstrap Image and NKP Image Builder Images into Docker.
+
+```bash
+sudo docker load -i konvoy-bootstrap-image-v2.15.0.tar
+sudo docker load -i nkp-image-builder-image-v2.15.0.tar
+```
+
+Notice that our Ubuntu user has constantly been using `sudo` to execute tasks with the `docker` command. Lets change that.
+
+```bash
+# Adds/Checks to ensure docker group is there
+sudo groupadd docker
+
+# Adds ubuntu user into docker group
+sudo usermod -aG docker ubuntu
+
+# Refreshes group memberships
+newgrp docker
+
+# Test, should execute without errors
+docker image ls; docker ps
+```
+
+## Creating an Image for our BaseOS
+
+First up, what we are going to be doing is we are going to be preparing a base image that we can use to deploy Nutanix Kubernetes Platform with.
+
+I won't go through the installation process of Ubuntu but there are a couple of things that I do want to call out.
+
+1. Ensure **swap** is not enabled
+
+2. Create your VM with a OS Disk < 80GiB. 
+- NKP by default, deploys Control Plane and Worker Node VMs with 80GiB of Disk Space. If our initial Image has say, 200GB and we leave the defaults as it, the installation will fail and we need to spend time troubleshooting. Leaving it as 80GiB as a start makes things easier and more predictable.
+
+- I have a script that after NIB Image Build is complete, when we inform NKP to spin a Control Plane or Worker Node that has, say a 400GB disk, it will automatically resize all the partitions.
+
+3. If you need to implement CIS Level 1 or Level 2 Hardening, make sure you set your Partition Layouts correctly. The sizes of the layout is really up to you, but we do want to give ample space for `/var/lib` as that's where container images we downloaded to.
+
+4. Ensure Cloud-Init is installed, and enabled
+
+My installation of Ubuntu which i will not cover here does have the recommended partition layouts, as well as the recommended CIS L1/L2 mount options set (noexec, nosuid, nodev) so that we can mimic as closely as possible to actual customer environments.
+
+<p align="center">   <img src={require('./2025-08-10-22-25-36.png').default} width={1000} border="2px"/> </p>
+
+Once the installation of Ubuntu has completed, i used this script to automatically help me resize the various partitions depending on percentages of additional free space added to the VM. Feel free to adopt and/or modify the logic if you want. Also note this script only runs once after reboot.
+
+Make sure to ensure that the logical volume matches what you have in your OS installation.
+
+The percentages (e.g. +60%FREE) can be customized to your needs/liking as well.
+
+We do this before "sealing" the image.
+
+```bash
+sudo tee /usr/local/sbin/autogrow-lvs.sh > /dev/null <<'EOF'
+#!/bin/bash
+set -euo pipefail
+VG=vg0
+
+# Find the PV device
+PV_DEV=$(pvs --noheadings -o pv_name | xargs)
+
+# Grow the partition containing the PV
+if command -v growpart >/dev/null 2>&1; then
+  DISK=$(echo "$PV_DEV" | sed -E 's/[0-9]+$//')
+  PARTNUM=$(echo "$PV_DEV" | grep -o '[0-9]*$')
+  if [ -b "$DISK$PARTNUM" ]; then
+    growpart "$DISK" "$PARTNUM" || true
+  fi
+fi
+
+# Resize the PV
+pvresize "$PV_DEV" || true
+
+# Extend the LVs in priority order
+lvextend -r -l +60%FREE /dev/${VG}/lv_var             || true #MAKE SURE THE LV NAME MATCHES YOUR ENVIRONMENT
+lvextend -r -l +25%FREE /dev/${VG}/lv_root            || true #MAKE SURE THE LV NAME MATCHES YOUR ENVIRONMENT 
+lvextend -r -l +10%FREE /dev/${VG}/lv_var_log         || true #MAKE SURE THE LV NAME MATCHES YOUR ENVIRONMENT
+lvextend -r -l  +5%FREE /dev/${VG}/lv_var_log_audit   || true #MAKE SURE THE LV NAME MATCHES YOUR ENVIRONMENT
+EOF
+sudo chmod 0755 /usr/local/sbin/autogrow-lvs.sh
+
+sudo tee /etc/systemd/system/autogrow-lvs.service > /dev/null <<'EOF'
+[Unit]
+Description=Auto-grow LVM volumes on first boot
+After=cloud-init.service local-fs.target
+ConditionPathExists=!/var/lib/autogrow-lvs.done
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/autogrow-lvs.sh
+# mark completion so it won't run again
+ExecStartPost=/usr/bin/mkdir -p /var/lib
+ExecStartPost=/usr/bin/touch /var/lib/autogrow-lvs.done
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable autogrow-lvs.service
+```
+
+Once you've done all the necessary customizations that you need, you'll want to seal and generalize the image for use. I use these commmands just after i complete my customizations before shutting down the VM.
+
+```bash
+systemctl enable cloud-init-local.service
+systemctl enable cloud-init.service
+systemctl enable cloud-config.service
+systemctl enable cloud-final.service
+systemctl start cloud-init.service
+systemctl start cloud-init-local.service
+systemctl start cloud-config.service
+systemctl start cloud-final.service
+ 
+sudo rm -f /etc/ssh/ssh_host_*
+sudo cloud-init clean --logs --machine-id
+sudo truncate -s 0 /etc/machine-id
+sudo rm -f /var/lib/dbus/machine-id
+sudo rm -rf /var/lib/cloud
+sudo rm -rf /tmp/* /var/tmp/*
+sudo journalctl --rotate
+sudo journalctl --vacuum-time=1s
+sudo rm -f /var/log/*.log /var/log/*-???????? /var/log/*.gz
+
+sudo poweroff
+```
+
+
+## Creating a CAPI Image from our BaseOS Image 
+
+We run the below commands to create a CAPI Image from the BaseOS Image we created earlier.
+
+#### The commands below then allows us to create the CAPI Compatible Image for the BaseOS Image we created earlier.
+
+```bash
+export NUTANIX_USER=your_pc_username
+export NUTANIX_PASSWORD=your_pc_password
+export PC_IP_FQDN=ip_address_of_prism_central
+export PE_CLUSTER=prism_element_cluster_where_we_want_to_run_the_build
+export SUBNET=subnet_we_want_to_run_the_build
+export SOURCE_IMAGE_NAME=name_of_image_we_created_earlier
+export PKR_VAR_disk_size_gb="80" # As our image is 80GB
+export PKR_VAR_remote_folder="/home/ubuntu" # Only needed if we have CIS Level 1 or 2 as the default folder is /tmp which has noexec 
+
+nkp create image nutanix ubuntu-22.04 \
+  --endpoint ${PC_IP_FQDN} \
+  --cluster ${PE_CLUSTER} \
+  --subnet ${SUBNET} \
+  --source-image ${SOURCE_IMAGE_NAME} \
+  --insecure
+```
+
+Once the process completes, you'll see something like this below.
+
+<p align="center">   <img src={require('./2025-08-09-21-30-37.png').default} width={800} border="2px"/> </p>
+
+And in Prism Central you'll see a fresh new image created.
+Note: The image name suffix is generated by date and time, so every new run will generate a new unique name.
+
+<p align="center">   <img src={require('./2025-08-09-21-31-41.png').default} width={500} border="2px"/> </p>
+
+## Creating a CAPI Image from our BaseOS Image for GPUs
+
+### Option 1 - Bake NVIDIA Drivers into BaseOS Image
+
+We can clone the BaseOS Image that we created earlier on, then attach a GPU Passthrough to the GPU we have. After which we can SSH into the VM and manually install the GPU Drivers. 
+
+I wont cover the installation steps of the NVIDIA GPU Driver directly in the OS itself. There are plenty of guides to guide you with that.
+
+Once the NVIDIA GPU Driver is installed, then run the same Nutanix Image Builder Steps that we have above. [Nutanix Image Builder Steps](nkp-deployment-internet#the-commands-below-then-allows-us-to-create-the-capi-compatible-image-for-the-baseos-image-we-created-earlier)
+
+### Option 2 - Nutanix Image Builder with GPU
+
+Creating a GPU compatible Image is similiar to creating an image without GPUs, all we need is to specify the additional GPU parameters.
+
+Nutanix Image Builder then automatically installs NVIDIA 535.183.06 GPU Driver into the Image. 535.183.06 is a LTSB (Long Term Servicing Branch) Driver for NVIDIA.
+
+Depending on the configuration of Ubuntu, if you have CIS partition layouts, you'll need to use a different script.
+
+#### Use this is you DONT HAVE CIS partition layouts
+```bash
+export NUTANIX_USER=your_pc_username
+export NUTANIX_PASSWORD=your_pc_password
+export PC_IP_FQDN=ip_address_of_prism_central
+export PE_CLUSTER=prism_element_cluster_where_we_want_to_run_the_build
+export SUBNET=subnet_we_want_to_run_the_build
+export SOURCE_IMAGE_NAME=name_of_image_we_created_earlier
+export GPU_NAME="name_of_gpu_from_prism_central" # Name of GPU Obtained from Prism Central
+export PKR_VAR_disk_size_gb="80" # As our image is 80GB
+export PKR_VAR_remote_folder="/home/ubuntu" # Only needed if we have CIS Level 1 or 2 as the default folder is /tmp which has noexec 
+
+nkp create image nutanix ubuntu-22.04 \
+  --endpoint ${PC_IP_FQDN} \
+  --cluster ${PE_CLUSTER} \
+  --subnet ${SUBNET} \
+  --source-image ${SOURCE_IMAGE_NAME} \
+  --gpu-name "${GPU_NAME}" \
+  --insecure
+```
+
+#### Use this is you HAVE CIS partition layouts
+
+```bash
+export NUTANIX_USER=your_pc_username
+export NUTANIX_PASSWORD=your_pc_password
+export PC_IP_FQDN=ip_address_of_prism_central
+export PE_CLUSTER=prism_element_cluster_where_we_want_to_run_the_build
+export SUBNET=subnet_we_want_to_run_the_build
+export SOURCE_IMAGE_NAME=name_of_image_we_created_earlier
+export GPU_NAME="name_of_gpu_from_prism_central" # Name of GPU Obtained from Prism Central
+export PKR_VAR_disk_size_gb="80" # As our image is 80GB
+export PKR_VAR_remote_folder="/home/ubuntu" # Only needed if we have CIS Level 1 or 2 as the default folder is /tmp which has noexec 
+
+mkdir cis-compatible
+nkp create image nutanix ubuntu-22.04 \
+  --endpoint ${PC_IP_FQDN} \
+  --cluster ${PE_CLUSTER} \
+  --subnet ${SUBNET} \
+  --source-image ${SOURCE_IMAGE_NAME} \
+  --gpu-name "${GPU_NAME}" \
+  --insecure \
+  --output-directory ./cis-compatible
+
+# Stream EDitor command to add TMPDIR=/opt
+sed -i '/- name: extract driver source files/{n;/shell: |/{n;s|\(.*\)"{{ nvidia_remote_bundle_path }}/{{ nvidia_runfile_installer }}" -x -s|\1TMPDIR=/opt "{{ nvidia_remote_bundle_path }}/{{ nvidia_runfile_installer }}" -x -s|}}' ./cis-compatible/playbooks/roles/gpu/tasks/nvidia-passthrough.yaml
+
+nkp create image nutanix ubuntu-22.04 \
+  --endpoint ${PC_IP_FQDN} \
+  --cluster ${PE_CLUSTER} \
+  --subnet ${SUBNET} \
+  --source-image ${SOURCE_IMAGE_NAME} \
+  --gpu-name "${GPU_NAME}" \
+  --insecure \
+  --from-directory ./cis-compatible
+```
+
+## Populating our Registry with Nutanix Kubernetes Platform Container Images
+
+This step allows us to populate the Harbor Registry we deployed in the previous videos/blogposts with the Nutanix Kubernetes Platform Container Images from the Airgapped bundle we downloaded earlier.
+
+If you dont already have a Harbor Registry, i've got you covered. [Harbor Registry Deployment. Internet Connected & Airgapped](harbor-deployment)
+
+I like to keep the NKP Images in a seperate Project but that's just my personal preference. Keeps things organized.
+
+Login to Harbor
+
+<p align="center">   <img src={require('./2025-08-10-23-46-26.png').default} width={300} border="2px"/> </p>
+
+**Default Username:** admin
+
+**Default Password:** Harbor12345
+
+Create a New Project
+<p align="center">   <img src={require('./2025-08-10-23-46-50.png').default} width={300} border="2px"/> </p>
+
+I like to call it mirror. And use the defaults.
+
+<p align="center">   <img src={require('./2025-08-10-23-47-34.png').default} width={500} border="2px"/> </p>
+
+
+```bash
+export NKP_VERSION="v2.15.0" # if your nkp directory name is nkp-v2.15.0, use v2.15.0 as the value
+export REGISTRY_MIRROR_URL="registry_url/with_repository" # e.g. registry.wskn.local/mirror
+export REGISTRY_MIRROR_USERNAME="registry_username"
+export REGISTRY_MIRROR_PASSWORD="registry_password"
+export REGISTRY_MIRROR_CACHAIN="/location/of/your/registry/ca/chain"
+
+# If not already in the nkp-v2.15.0 directory
+cd nkp-v2.15.0
+
+nkp push bundle --bundle ./container-images/konvoy-image-bundle-${NKP_VERSION}.tar \
+  --to-registry=${REGISTRY_MIRROR_URL} \
+  --to-registry-username=${REGISTRY_MIRROR_USERNAME} \
+  --to-registry-password=${REGISTRY_MIRROR_PASSWORD} \
+  --to-registry-ca-cert-file=${REGISTRY_MIRROR_CACHAIN}
+
+nkp push bundle --bundle ./container-images/kommander-image-bundle-${NKP_VERSION}.tar \
+  --to-registry=${REGISTRY_MIRROR_URL} \
+  --to-registry-username=${REGISTRY_MIRROR_USERNAME} \
+  --to-registry-password=${REGISTRY_MIRROR_PASSWORD} \
+  --to-registry-ca-cert-file=${REGISTRY_MIRROR_CACHAIN}
+```
+
+And thats it.
+
+## Creating the Nutanix Kubernetes Platform Cluster
+
+Now the moment we've been waiting for. Lets create a NKP Cluster.
+
+Lets Export the evironment variables first. This is the "Hardest" part. 
+
+We'll use VI to edit the environment variables in the terminal.
+
+```bash
+cat << 'EOF' > env.sh
+export CLUSTER_NAME=nkp-cluster-name
+export CONTROL_PLANE_IP=k8s_control_plane_ip
+export IMAGE_NAME=clusterapi_compatible_image_name
+export PRISM_ELEMENT_CLUSTER_NAME=prism_element_cluster_name
+export SUBNET_NAME=subnet_name
+export CONTROL_PLANE_REPLICAS=3
+export CONTROL_PLANE_VCPUS=2
+export CONTROL_PLANE_CORES_PER_VCPU=2
+export CONTROL_PLANE_MEMORY_GIB=16
+export WORKER_REPLICAS=4
+export WORKER_VCPUS=2
+export WORKER_CORES_PER_VCPU=4
+export WORKER_MEMORY_GIB=32
+export NUTANIX_STORAGE_CONTAINER_NAME=storage_container_name
+export LB_IP_RANGE=load_balancer_start_ip-load_balancer_end_ip
+export SSH_KEY_FILE=/path/to/ssh_public_key.pub
+
+# Nutanix Prism Central
+export NUTANIX_PC_FQDN_ENDPOINT_WITH_PORT=https://prism.central.fqdn:9440
+export NUTANIX_PC_CA=/path/to/pc_ca_chain.crt
+export NUTANIX_PC_CA_B64="$(base64 -w 0 < "$NUTANIX_PC_CA")"
+export NUTANIX_USER=prism_central_username
+export NUTANIX_PASSWORD=prism_central_password
+
+# Container Registry
+export REGISTRY_URL=https://registry.fqdn
+export REGISTRY_USERNAME=registry_username
+export REGISTRY_PASSWORD=registry_password
+export REGISTRY_CA=/path/to/registry_ca_chain.crt
+
+# Registry Mirror (for NKP Images)
+export REGISTRY_MIRROR_URL=https://registry.fqdn/mirror
+export REGISTRY_MIRROR_USERNAME=registry_username
+export REGISTRY_MIRROR_PASSWORD=registry_password
+export REGISTRY_MIRROR_CA=/path/to/registry_ca_chain.crt
+
+# Ingress
+export CLUSTER_HOSTNAME=nkp.cluster.fqdn
+export INGRESS_CERT=/path/to/ingress.crt
+export INGRESS_KEY=/path/to/ingress.key
+export INGRESS_CA=/path/to/ca_chain.crt
+EOF
+```
+
+Fill up the environment variables. Then we can create the Cluster.
+
+```bash
+# Load environment variables
+source env.sh 
+
+nkp create cluster nutanix \
+    --cluster-name "$CLUSTER_NAME" \
+    --endpoint "$NUTANIX_PC_FQDN_ENDPOINT_WITH_PORT" \
+    --additional-trust-bundle "$NUTANIX_PC_CA_B64" \
+    --control-plane-endpoint-ip "$CONTROL_PLANE_IP" \
+    --control-plane-vm-image "$IMAGE_NAME" \
+    --control-plane-prism-element-cluster "$PRISM_ELEMENT_CLUSTER_NAME" \
+    --control-plane-subnets "$SUBNET_NAME" \
+    --control-plane-replicas "$CONTROL_PLANE_REPLICAS" \
+    --control-plane-vcpus "$CONTROL_PLANE_VCPUS" \
+    --control-plane-cores-per-vcpu "$CONTROL_PLANE_CORES_PER_VCPU" \
+    --control-plane-memory "$CONTROL_PLANE_MEMORY_GIB" \
+    --worker-vm-image "$IMAGE_NAME" \
+    --worker-prism-element-cluster "$PRISM_ELEMENT_CLUSTER_NAME" \
+    --worker-subnets "$SUBNET_NAME" \
+    --worker-replicas "$WORKER_REPLICAS" \
+    --worker-vcpus "$WORKER_VCPUS" \
+    --worker-cores-per-vcpu "$WORKER_CORES_PER_VCPU" \
+    --worker-memory "$WORKER_MEMORY_GIB" \
+    --ssh-public-key-file "$SSH_KEY_FILE" \
+    --csi-storage-container "$NUTANIX_STORAGE_CONTAINER_NAME" \
+    --kubernetes-service-load-balancer-ip-range "$LB_IP_RANGE" \
+    --self-managed \
+    --certificate-renew-interval 30 \
+    --registry-mirror-url "$REGISTRY_MIRROR_URL" \
+    --registry-mirror-cacert "$REGISTRY_MIRROR_CA" \
+    --registry-mirror-username "$REGISTRY_MIRROR_USERNAME" \
+    --registry-mirror-password "$REGISTRY_MIRROR_PASSWORD" \
+    --registry-url "$REGISTRY_URL" \
+    --registry-cacert "$REGISTRY_CA" \
+    --registry-username "$REGISTRY_USERNAME" \
+    --registry-password "$REGISTRY_PASSWORD" \
+    --cluster-hostname "$CLUSTER_HOSTNAME" \
+    --ingress-certificate "$INGRESS_CERT" \
+    --ingress-private-key "$INGRESS_KEY" \
+    --ingress-ca "$INGRESS_CA"
+```
+
+
+
+
+
