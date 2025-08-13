@@ -46,7 +46,7 @@ Then head over to the Downloads Section
 
 Select Nutanix Kubernetes Platform
 
-<p align="center">   <img src={require('./2025-08-09-20-39-54.png').default}  border="2px"/> </p>
+<p align="center">   <img src={require('./2025-08-09-20-39-54.png').default} width={700} border="2px"/> </p>
 
 Get the URL of the NKP Airgapped Bundle version you wish to download.
 
@@ -453,8 +453,98 @@ nkp create cluster nutanix \
     --ingress-private-key "$INGRESS_KEY" \
     --ingress-ca "$INGRESS_CA"
 ```
+## Logging into the Cluster
 
+Once the Cluster has completed deployment, we see that the installation will provide a command to generate the dashboard details.
 
+<p align="center">   <img src={require('./2025-08-13-15-03-26.png').default} width={700} border="2px"/> </p>
 
+Running the command `nkp get dashboard --kubeconfig=pathToKubeconfig` will generate the dashboard access URL and credentials.
 
+<p align="center">   <img src={require('./2025-08-13-15-15-05.png').default} width={700} border="2px"/> </p>
 
+Then Open a browser and access the NKP Dashboard. 
+
+<p align="center">   <img src={require('./2025-08-13-15-15-58.png').default} width={800} border="2px"/> </p>
+
+### Updating License
+
+We can upgrade the license to NKP Ultimate (or Pro) if we have a license key.
+
+Under the Workspace Selector, Settings -> Licensing. We can click on `Remove License`
+
+<p align="center">   <img src={require('./2025-08-13-15-18-05.png').default} width={800} border="2px"/> </p>
+
+Then we can add in the new `License Key` that we can obtain from the Nutanix Portal. Doing so will update the license edition to NKP Ultimate or Pro.
+
+<p align="center">   <img src={require('./2025-08-13-15-19-34.png').default} width={800} border="2px"/> </p>
+
+## Deploying a GPU Workload Cluster
+
+We can now create a Workload Cluster using the GPU ClusterAPI Compatible Image we created earlier.
+
+Under the Workspace Selector -> Create Workspace
+
+<p align="center">   <img src={require('./2025-08-13-15-24-36.png').default} width={300} border="2px"/> </p>
+
+Then create a Workspace named `wskn-gpu`. The name is up to you. A Workspace is one or more Clusters grouped together. Things like Platform App Deployments or Cluster based RBAC can be configured at the workspace level and all clusters within the Workspace will inherit those settings.
+
+<p align="center">   <img src={require('./2025-08-13-15-25-40.png').default} width={800} border="2px"/> </p>
+
+Then we can go ahead and head into the Clusters Tab, and Click on Create Cluster.
+
+<p align="center">   <img src={require('./2025-08-13-15-31-21.png').default} width={800} border="2px"/> </p>
+
+Click on Create Cluster
+
+<p align="center">   <img src={require('./2025-08-13-15-32-08.png').default} width={400} border="2px"/> </p>
+
+Then fill up the Cluster Creation UI Form.
+
+It's pretty self-explainatory so i wont go through that here.
+
+### Adding a GPU Nodepool.
+
+Once we have kicked off the Provisioning Process, we can click into the Cluster and add an additional Node Pool.
+
+Click into the Cluster we just created, doesnt matter that it's still provisioning.
+
+<p align="center">   <img src={require('./2025-08-13-15-34-25.png').default} width={800} border="2px"/> </p>
+
+Under Nodepools, Just click Add Nodepool.
+
+<p align="center">   <img src={require('./2025-08-13-15-35-44.png').default} width={800} border="2px"/> </p>
+
+Fill up the fields, but make sure to select GPU Capable NodeOS Image we created and select GPUs to passthrough into the nodes.
+
+<p align="center">   <img src={require('./2025-08-13-15-37-36.png').default} width={800} border="2px"/> </p>
+
+Once that is Done, we can go to the Applications Tab and enable the NVIDIA GPU Operator.
+
+<p align="center">   <img src={require('./2025-08-13-15-39-27.png').default} width={800} border="2px"/> </p>
+
+Once the Cluster finishes Provisioning, we can generate the Kubeconfig
+
+<p align="center">   <img src={require('./2025-08-13-15-40-59.png').default} width={800} border="2px"/> </p>
+
+Once we have the kubeconfig, we can export the environment variable to use kubectl or k9s to access the cluster.
+
+```bash
+export KUBECONFIG=pathToDownloadedKubeconfig
+```
+
+When we launch k9s and Navigate to the GPU Nodes, we see that the GPU Driver has detected the GPUs and Labelled the Nodes.
+
+<p align="center">   <img src={require('./2025-08-13-15-42-51.png').default} width={800} border="2px"/> </p>
+
+<p align="center">   <img src={require('./2025-08-13-15-43-52.png').default} width={800} border="2px"/> </p>
+
+We can also Launch the Grafana Dashboard to take a look at the GPU Usage.
+
+<p align="center">   <img src={require('./2025-08-13-15-44-52.png').default} width={400} border="2px"/> </p>
+
+<p align="center">   <img src={require('./2025-08-13-15-45-39.png').default} width={800} border="2px"/> </p>
+
+Thats it. We deployed NKP and a GPU Workload Cluster in an internet connected environment.
+
+Thanks for reading and see you in the next one.
