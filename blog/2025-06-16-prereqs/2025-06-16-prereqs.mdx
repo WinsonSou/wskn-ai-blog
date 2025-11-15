@@ -210,6 +210,21 @@ source <(step completion bash)
 echo "source <(step completion bash)" >> ~/.bashrc
 echo "source <(step completion bash)" | sudo tee -a /root/.bashrc > /dev/null
 
+# Install Velero CLI
+curl -LO https://github.com/vmware-tanzu/velero/releases/download/v1.17.1/velero-v1.17.1-linux-amd64.tar.gz
+tar -xzf velero-v1.17.1-linux-amd64.tar.gz
+sudo mv velero-v1.17.1-linux-amd64/velero /usr/local/bin/velero
+sudo rm -rf velero*
+echo "source <(velero completion bash)" >> ~/.bashrc
+echo "source <(velero completion bash)" | sudo tee -a /root/.bashrc > /dev/null
+
+
+sudo groupadd docker
+# Adds ubuntu user into docker group
+sudo usermod -aG docker ubuntu
+# Refreshes group memberships
+newgrp docker
+
 ```
 </TabItem>
 
