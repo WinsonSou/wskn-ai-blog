@@ -1,0 +1,67 @@
+apiVersion: troubleshoot.sh/v1beta2
+kind: Redactor
+metadata:
+  name: nkp-partial-redactors
+
+spec:
+  redactors:
+
+    ###########################################################################
+    # RULE 1: REDACT SELECTED STRINGS INSIDE FQDNS
+    #
+    # Masks only the sensitive substring and preserves the rest of the FQDN.
+    #
+    # Example:
+    #   api-sensitive-val1-prod.example.com
+    #   becomes:
+    #   api-***HIDDEN***-prod.example.com
+    #
+    # Add or remove values inside the named mask group:
+    #   (?P<mask>sensitive-val1|sensitive-val2|customer-name)
+    #
+    # Matching is case-insensitive because the expression starts with (?i).
+    ###########################################################################
+
+    - name: redact-sensitive-substrings-inside-hostnames-and-fqdns
+      removals:
+        regex:
+          - redactor: '(?i)(\b(?:[a-z0-9-]+\.)*[a-z0-9-]*)(?P<mask>ntnxlab|ntnx|wskn)([a-z0-9-]*(?:\.[a-z0-9-]+)*\b)'
+
+    ###########################################################################
+    # RULE 2: REDACT THE FIRST TWO OCTETS OF SELECTED LAN IP ADDRESSES
+    #
+    # Masks only explicitly listed LAN prefixes.
+    #
+    # Examples:
+    #   192.168.20.45 -> ***HIDDEN***.20.45
+    #   172.20.8.10   -> ***HIDDEN***.8.10
+    #   10.50.100.25  -> ***HIDDEN***.100.25
+    #
+    # Replace the example prefixes with the LAN prefixes used by your nodes.
+    #
+    # Do not add pod or service network prefixes. This keeps pod IPs, pod CIDRs,
+    # Service ClusterIPs, and service CIDRs visible.
+    ###########################################################################
+    - name: redact-first-two-octets-of-selected-lan-ips
+      removals:
+        regex:
+
+          # LAN prefix: 172.20.x.x
+          # Change "20" to the required second octet.
+          - redactor: '(?P<mask>\b172\.168)(\.(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})\.(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})\b)'
+
+          # LAN prefix: 10.50.x.x
+          # Change "50" to the required second octet.
+          - redactor: '(?P<mask>\b10\.8)(\.(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})\.(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})\b)'
+
+
+###############################################################################
+# USAGE
+#
+# - Only text inside (?P<mask>...) is hidden.
+# - These rules apply to collected logs and other text files in the bundle.
+# - Add sensitive FQDN strings to Rule 1.
+# - Add only node LAN prefixes to Rule 2.
+# - Do not add pod or service CIDR prefixes.
+# - Test the extracted bundle before sharing it.
+###############################################################################
